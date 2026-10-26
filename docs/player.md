@@ -31,8 +31,10 @@ put it. It runs on enshwick.
 
 You change the counts in the game, as the
 [settings guide](https://enshwick.github.io/docs/guides/change-mod-settings/)
-shows: each Flame level has its own slider from 1 to 32. On the first start the
-mod takes the counts you set under its former name, `flame-altar-count`.
+shows: each Flame level has its own slider from 1 to 32. A value outside 1 to
+32 in the file is set to the nearest limit, with a warning in the log. On the
+first start the mod takes the counts you set under its former name,
+`flame-altar-count`.
 
 ## Multiplayer
 

@@ -49,7 +49,7 @@ struct Settings {
     /// share a base, and an altar that would start a 17th base is refused.
     /// Vanilla: [1, 2, 4, 6, 8, 10, 11, 12, 13, 14, 15, 16]
     /// A joined player runs with the server's table.
-    #[config(sync, range = 1..=CAP, text = "config.altars")]
+    #[config(sync, range = 1..=CAP, first = 0, text = "config.altars")]
     altars_per_flame_level: Vec<u16>,
 }
 
@@ -68,15 +68,15 @@ struct AltarTable {
 }
 
 impl AltarTable {
-    /// A table from the settings: capped at `cap`, at least 1, the vanilla
-    /// table when empty.
+    /// A table from the settings, already within 1 to [`CAP`]: lowered to
+    /// `cap`, the vanilla table when empty.
     fn new(levels: &[u16], cap: u8) -> Self {
         let table = if levels.is_empty() {
             VANILLA_ALTARS_PER_FLAME_LEVEL.to_vec()
         } else {
             levels
                 .iter()
-                .map(|&n| u8::try_from(n.clamp(1, u16::from(cap))).unwrap_or(cap))
+                .map(|&n| u8::try_from(n.min(u16::from(cap))).unwrap_or(cap))
                 .collect()
         };
         Self { table }
@@ -239,26 +239,26 @@ mod tests {
         assert_eq!(texts.untranslated(), []);
         for field in Settings::schema().fields {
             let doc = format!("{}.doc", field.text);
-            for key in [&field.text, &doc] {
+            let element = format!("{}.element", field.text);
+            for key in [&field.text, &doc, &element] {
                 assert!(texts.get(key, Language::FALLBACK).is_some(), "{key}");
             }
         }
     }
 
     #[test]
-    fn every_level_takes_1_to_32_altars() {
-        for table in [vec![1, 32], vec![2; 16]] {
-            let settings = Settings {
-                altars_per_flame_level: table,
-            };
-            assert!(settings.validate().is_ok());
-        }
-        for table in [vec![0], vec![4, 33]] {
-            let settings = Settings {
-                altars_per_flame_level: table,
-            };
-            assert!(settings.validate().is_err());
-        }
+    fn a_level_outside_1_to_32_altars_is_held_to_the_range() {
+        let loader = enshwick::test::FakeHost::new()
+            .side(Side::CLIENT)
+            .settings("altars_per_flame_level = [0, 40, 5]\n")
+            .install();
+        // SAFETY: the exports of `declare_mod!` above.
+        let status = unsafe { loader.start(enshwick_mod_init, enshwick_mod_ready) };
+        assert_eq!(status, enshwick::abi::Status::OK, "{:?}", loader.logs());
+        assert_eq!(loader.altar_limit(0), Some(1));
+        assert_eq!(loader.altar_limit(1), Some(32));
+        assert_eq!(loader.altar_limit(2), Some(5));
+        assert!(loader.faults().is_empty());
     }
 
     #[test]

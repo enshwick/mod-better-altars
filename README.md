@@ -23,11 +23,12 @@ altars_per_flame_level = [2, 4, 8, 12, 16, 20, 22, 24, 26, 28, 30, 32]
 ```
 
 The first entry is Flame level 0, which comes before the Flame level 1 a new
-world starts at. Levels past the end of the list use its last entry. An empty list is the
-vanilla table. Each level takes 1 to 32 altars; a file with a value outside
-that range is refused, and the log says why. While the mod keeps the game's
-limit of 16, values above 16 become 16. A change applies while the game runs.
-The number of levels in the list changes in the file only.
+world starts at. Levels past the end of the list use its last entry. An empty
+list is the vanilla table. Each level takes 1 to 32 altars: a value outside
+that range in the file is set to the nearest limit, with a warning in the log.
+While the mod keeps the game's limit of 16, values above 16 become 16. A
+change applies while the game runs. The number of levels in the list changes
+in the file only.
 
 The mod's gear on the Mods screen shows the table, in the player's language
 where [texts.toml](src/texts.toml) has it, else in English.
