@@ -43,7 +43,8 @@ pub struct AltarLimit {
 #[derive(Debug, serde::Deserialize, serde::Serialize, enshwick::Config)]
 #[serde(deny_unknown_fields)]
 struct Settings {
-    /// Altars this Flame level allows, from 1 to 32; levels past the list use
+    /// Altars this Flame level allows, from 1 to 32; the list starts at level
+    /// 0, before the level 1 a new world starts at, and levels past it use
     /// its last entry. All altars fit in 16 bases: altars whose zones touch
     /// share a base, and an altar that would start a 17th base is refused.
     /// Vanilla: [1, 2, 4, 6, 8, 10, 11, 12, 13, 14, 15, 16]

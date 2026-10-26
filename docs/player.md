@@ -7,12 +7,12 @@ settings:
   - key: altars_per_flame_level
     default: "[2, 4, 8, 12, 16, 20, 22, 24, 26, 28, 30, 32]"
     range: 1 to 32 for each level
-    meaning: How many altars each Flame level allows, from the first level on. Later levels use the last number. An empty list keeps the usual counts.
+    meaning: How many altars each Flame level allows. The first number is level 0, which comes before the Flame level 1 a new world starts at. Later levels use the last number. An empty list keeps the usual counts.
     applies: at-once
 ---
 
 - By default, each Flame level allows twice as many Flame Altars as in the base
-  game: 2 at the first level, up to 32 from the twelfth level on.
+  game: 4 at Flame level 1, up to 32 from level 11 on.
 - You choose the count for each Flame level.
 - A world holds at most 16 bases.
 
