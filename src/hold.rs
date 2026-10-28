@@ -1,15 +1,18 @@
-//! A world past 16 altar zones cannot open safely with the vanilla grouping,
-//! so the dedicated server holds the game on it while it has one.
+//! A world past the game's own altar zones or bases loses base features for
+//! the altars past them when it opens with the vanilla grouping, so the
+//! dedicated server holds the game on it while it has one.
 //!
-//! The hold is set as soon as a grouping counts more than 16 zones, and goes
-//! only once the loaded world has stayed at 16 or fewer for a while: a
-//! grouping that runs before the world loads, or before every altar of it is
-//! listed, counts too few and must not release a world that needs the hold.
+//! The hold is set as soon as a grouping counts more zones or bases than the
+//! game's own, and goes only once the loaded world has stayed within them
+//! for a while: a grouping that runs before the world loads, or before every
+//! altar of it is listed, counts too few and must not release a world that
+//! needs the hold.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use enshwick::altars::{BaseLimit, Grouping};
 use enshwick::events::{AltarsChanged, ShutdownStarted, WorldLoaded};
 use enshwick::state::Hold;
 use enshwick::{Load, Off};
@@ -18,7 +21,8 @@ use enshwick::{Load, Off};
 const THREAD: &str = "better-altars-hold";
 /// How often the hold thread looks at the grouping without being woken.
 const EVERY: Duration = Duration::from_secs(5);
-/// How long the loaded world stays at 16 zones or fewer before the hold goes.
+/// How long the loaded world stays within the game's own zones and bases
+/// before the hold goes.
 const RELEASE_AFTER: Duration = Duration::from_secs(60);
 
 /// Keeps the hold on a thread of its own, woken when the altars change.
@@ -52,8 +56,8 @@ enum Step {
     Wait,
 }
 
-/// Whether the hold is set, and since when the loaded world has had 16
-/// zones or fewer.
+/// Whether the hold is set, and since when the loaded world has stayed
+/// within the game's own zones and bases.
 #[derive(Debug)]
 struct Watch {
     set: bool,
@@ -68,8 +72,8 @@ impl Watch {
         }
     }
 
-    /// The step for a grouping past 16 zones or not, `past`, at `now`, with
-    /// the world `loaded` or not yet.
+    /// The step for a grouping past the game's own or not, `past`, at
+    /// `now`, with the world `loaded` or not yet.
     fn step(&mut self, past: bool, loaded: bool, now: Instant) -> Step {
         if past {
             self.below_since = None;
@@ -97,6 +101,15 @@ impl Watch {
     }
 }
 
+/// The hold's reason for a world of `grouping` past the game's own `limit`.
+fn past_reason(grouping: Grouping, limit: BaseLimit) -> String {
+    format!(
+        "the world has {} altar zones in {} bases, past the game's own {} zones in {} bases; \
+         without the raised limit the altars past them lose their base features",
+        grouping.zones, grouping.bases, limit.vanilla_zones, limit.vanilla_bases
+    )
+}
+
 /// Sets and releases the hold as the grouping and the loaded world say.
 fn run(hold: &Hold, loaded: &AtomicBool) {
     let mut watch = Watch::new(hold.reason().is_some());
@@ -105,24 +118,23 @@ fn run(hold: &Hold, loaded: &AtomicBool) {
         let Some(grouping) = enshwick::altars::grouping() else {
             continue;
         };
-        let Some(vanilla) = enshwick::altars::base_limit().map(|limit| limit.vanilla_zones) else {
+        let Some(limit) = enshwick::altars::base_limit() else {
             continue;
         };
-        let zones = grouping.zones;
-        let past = zones > vanilla;
+        let past = limit.past_vanilla(grouping);
         let done = match watch.step(past, loaded.load(Ordering::Acquire), Instant::now()) {
             Step::Wait => continue,
-            Step::Set => hold.set(&format!(
-                "the world has {zones} altar zones; the vanilla game groups only {vanilla}"
-            )),
+            Step::Set => hold.set(&past_reason(grouping, limit)),
             Step::Release => hold.clear(),
         };
         match done {
             Ok(()) => {
                 watch.done(past);
                 enshwick::info!(
-                    "hold {}: {zones} altar zones",
-                    if past { "set" } else { "released" }
+                    "hold {}: {} altar zones in {} bases",
+                    if past { "set" } else { "released" },
+                    grouping.zones,
+                    grouping.bases
                 );
             }
             Err(error) => {
@@ -165,7 +177,7 @@ mod tests {
         assert_eq!(
             watch.step(false, true, loaded + EVERY * 2 + RELEASE_AFTER),
             Step::Release,
-            "altars removed down to 16"
+            "altars removed down to the game's own"
         );
         watch.done(false);
         assert_eq!(

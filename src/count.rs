@@ -1,9 +1,10 @@
-//! How many Flame Altars each Flame level allows, up to 32 in 16 bases.
+//! How many Flame Altars each Flame level allows, up to 255 in 16 bases.
 //!
 //! The table is a join value: a client joined to a server runs with the
-//! server's. The platform raises the game's grouping to 32 altar zones in its
-//! 16 bases; where it cannot, the table stays capped at 16. Other mods change
-//! the limit by joining the loader's altar-limit chain with `on_altar_limit`.
+//! server's. The platform lets the game group up to 255 altar zones into its
+//! 16 bases; where it cannot, the table stays capped at the game's own count.
+//! Other mods change the limit by joining the loader's altar-limit chain with
+//! `on_altar_limit`.
 
 use std::sync::Arc;
 
@@ -14,9 +15,14 @@ use enshwick::{Load, Off};
 
 use crate::hold;
 
-/// The most altars the settings take: a base names at most 32 altar zones.
-/// The loader keeps every answer within what the game groups.
-pub(crate) const CAP: u8 = 32;
+/// The most altars the settings take: the most altar zones the platform
+/// groups into bases. The loader keeps every answer within what the game
+/// groups.
+pub(crate) const CAP: u8 = u8::MAX;
+
+/// The bases the mod asks for: the game's own 16, which every altar fits in
+/// when touching zones share a base.
+const BASES: u32 = 16;
 
 /// The most altars the game's own grouping takes, from the loader; the
 /// settings' cap when the loader does not say.
@@ -26,11 +32,17 @@ fn vanilla_cap() -> u8 {
         .unwrap_or(CAP)
 }
 
+/// The altar zones to ask the platform for: [`CAP`], or less where the
+/// loader takes less.
+fn requested_cap() -> u8 {
+    base_limit().map_or(CAP, |limit| u8::try_from(limit.max_zones).unwrap_or(CAP))
+}
+
 /// How many altars each Flame level allows.
 #[derive(Debug, serde::Deserialize, serde::Serialize, enshwick::Config)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct Count {
-    /// Altars this Flame level allows, from 1 to 32; the list starts at level
+    /// Altars this Flame level allows, from 1 to 255; the list starts at level
     /// 0, before the level 1 a new world starts at, and levels past it use
     /// its last entry. All altars fit in 16 bases: altars whose zones touch
     /// share a base, and an altar that would start a 17th base is refused.
@@ -72,7 +84,9 @@ impl AltarTable {
             .iter()
             .any(|&n| n > u16::from(cap))
         {
-            enshwick::warn!("altars above {cap} lowered to {cap}: {}", cap_reason(cap));
+            enshwick::warn!(
+                "altars above {cap} lowered to {cap}, the most altar zones the game groups into bases here"
+            );
         }
         let table = Self::new(&count.altars_per_flame_level, cap);
         enshwick::info!("altars per Flame level: {:?}", table.table);
@@ -90,34 +104,27 @@ impl AltarTable {
     }
 }
 
-/// Why the table stops at `cap`.
-fn cap_reason(cap: u8) -> &'static str {
-    if cap == CAP {
-        "a base names at most 32 altar zones"
-    } else {
-        "the game groups only 16 altar zones into bases here"
-    }
-}
-
 /// The running table, swapped whole when the settings or the server's join
 /// values change, under the cap in force.
 #[derive(Debug)]
 pub(crate) struct AltarCount {
     table: ArcSwap<AltarTable>,
-    /// [`CAP`] once the base limit is lifted, else the game's own grouping.
+    /// The altar zones the platform groups once the request is in force,
+    /// else the game's own grouping.
     cap: u8,
 }
 
 impl AltarCount {
-    /// Raises the base limit, keeps the hold on a server; the game's limit is
-    /// linked by the mod.
+    /// Asks for the altar zones the table takes, keeps the hold on a server;
+    /// the game's limit is linked by the mod.
     pub(crate) fn start(load: &mut Load<'_>, count: &Count) -> Result<Self, Off> {
         let server = load.host().build().side == Side::SERVER;
-        let cap = if load.raise_base_limit()? {
+        let requested = requested_cap();
+        let cap = if load.request_base_limits(u32::from(requested), BASES)? {
             if server {
                 hold::keep(load)?;
             }
-            CAP
+            requested
         } else {
             // A world held for its altars must not open with the vanilla
             // grouping: off, the loader stops the server for the hold.
@@ -173,10 +180,16 @@ mod tests {
 
     #[test]
     fn values_are_capped_and_an_empty_table_answers_the_game_s_count() {
-        let table = AltarTable::new(&[1, 3, 32], CAP);
+        let table = AltarTable::new(&[1, 3, 32, 255, 300], CAP);
         assert_eq!(
-            [table.altars(0, 1), table.altars(1, 2), table.altars(2, 4)],
-            [1, 3, 32]
+            [
+                table.altars(0, 1),
+                table.altars(1, 2),
+                table.altars(2, 4),
+                table.altars(3, 6),
+                table.altars(4, 8),
+            ],
+            [1, 3, 32, 255, 255]
         );
         assert_eq!(AltarTable::new(&[], CAP).altars(0, 1), 1);
         let unlifted = AltarTable::new(&[1, 3, 32], 16);

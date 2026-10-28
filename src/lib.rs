@@ -1,4 +1,4 @@
-//! Better Altars: how many Flame Altars each Flame level allows, up to 32 in
+//! Better Altars: how many Flame Altars each Flame level allows, up to 255 in
 //! 16 bases, and Flame Altar zones that touch grow together and can be built
 //! across.
 //!
@@ -275,16 +275,86 @@ mod tests {
     }
 
     #[test]
-    fn a_level_outside_1_to_32_altars_is_held_to_the_range() {
+    fn a_level_outside_the_settings_range_is_held_to_it() {
         let loader = started(
             Side::CLIENT,
-            "[count]\naltars_per_flame_level = [0, 40, 5]\n",
+            "[count]\naltars_per_flame_level = [0, 40, 300, 5]\n",
             &[],
         );
         assert_eq!(loader.altar_limit(0, 1), 1);
-        assert_eq!(loader.altar_limit(1, 2), 32);
-        assert_eq!(loader.altar_limit(2, 4), 5);
+        assert_eq!(loader.altar_limit(1, 2), 40);
+        assert_eq!(loader.altar_limit(2, 4), CAP);
+        assert_eq!(loader.altar_limit(3, 6), 5);
         assert!(loader.faults().is_empty());
+    }
+
+    #[test]
+    fn the_mod_asks_for_every_altar_zone_the_table_takes_in_the_game_s_bases() {
+        let _loader = started(Side::CLIENT, "", &[]);
+        let limit = enshwick::altars::base_limit().unwrap();
+        assert_eq!(
+            (limit.zones, limit.bases),
+            (u32::from(CAP), limit.vanilla_bases)
+        );
+    }
+
+    #[test]
+    fn the_table_answers_the_limit_past_32_altars() {
+        let loader = started(
+            Side::CLIENT,
+            "[count]\naltars_per_flame_level = [2, 64, 200, 255]\n",
+            &[],
+        );
+        assert_eq!(loader.altar_limit(1, 2), 64);
+        assert_eq!(loader.altar_limit(2, 4), 200);
+        assert_eq!(loader.altar_limit(11, 16), 255);
+        assert!(loader.faults().is_empty());
+    }
+
+    /// The hold's reason, waiting up to `wait` for it, on a server whose
+    /// world groups `zones` altar zones in `bases` bases.
+    fn held(zones: u32, bases: u32, wait: Duration) -> Option<String> {
+        let dir = std::env::temp_dir().join(format!(
+            "enshwick-better-altars-hold-{}-{zones}-{bases}",
+            std::process::id()
+        ));
+        let loader = enshwick::test::FakeHost::new()
+            .side(Side::SERVER)
+            .data_dir(dir.to_str().unwrap())
+            .install();
+        // SAFETY: the exports of `declare_mod!` above.
+        let status = unsafe { loader.start(enshwick_mod_init, enshwick_mod_ready) };
+        assert_eq!(status, Status::OK, "{:?}", loader.logs());
+        loader.set_grouping(zones, bases);
+        let hold = enshwick::state::Hold::new(&dir);
+        let deadline = Instant::now() + wait;
+        while hold.reason().is_none() && Instant::now() < deadline {
+            assert!(loader.raise::<AltarsChanged>(&()) >= 1);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let reason = hold.reason();
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+        reason
+    }
+
+    #[test]
+    fn a_server_holds_a_world_past_the_game_s_own_bases() {
+        let reason = held(16, 17, Duration::from_secs(10)).expect("held");
+        assert!(reason.contains("16 altar zones in 17 bases"), "{reason}");
+        assert!(reason.contains("lose their base features"), "{reason}");
+    }
+
+    #[test]
+    fn a_server_holds_a_world_past_the_game_s_own_altar_zones() {
+        let reason = held(66, 5, Duration::from_secs(10)).expect("held");
+        assert!(reason.contains("66 altar zones in 5 bases"), "{reason}");
+    }
+
+    #[test]
+    fn a_server_does_not_hold_a_world_within_the_game_s_own_limits() {
+        assert_eq!(held(16, 16, Duration::from_secs(1)), None);
     }
 
     #[test]
@@ -353,10 +423,13 @@ mod tests {
             min: [5, 1, 1],
             max: [15, 9, 9],
         };
-        assert!(loader.zone_check(&zones, across, 0));
-        assert!(!loader.zone_check(&zones[..1], across, 0));
+        assert!(loader.building_zone_check(&zones, across, 0));
+        assert!(!loader.building_zone_check(&zones[..1], across, 0));
         AltarZones::set_seams(false);
-        assert!(!loader.zone_check(&zones, across, 0), "seams off: vanilla");
+        assert!(
+            !loader.building_zone_check(&zones, across, 0),
+            "seams off: vanilla"
+        );
         AltarZones::set_seams(true);
         assert!(loader.faults().is_empty());
     }
