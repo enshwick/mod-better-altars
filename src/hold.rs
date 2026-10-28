@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use enshwick::altars::{BaseLimit, Grouping};
 use enshwick::events::{AltarsChanged, ShutdownStarted, WorldLoaded};
-use enshwick::state::Hold;
+use enshwick::state::{Hold, StoreError};
 use enshwick::{Load, Off};
 
 /// The name of the hold's thread, which a crash report shows.
@@ -24,6 +24,11 @@ const EVERY: Duration = Duration::from_secs(5);
 /// How long the loaded world stays within the game's own zones and bases
 /// before the hold goes.
 const RELEASE_AFTER: Duration = Duration::from_secs(60);
+/// The text of the hold's reason in the mod's texts.
+pub(crate) const PAST_TEXT: &str = "hold.past";
+/// The text of the reason the mod turns off when the hold's thread does not
+/// start.
+pub(crate) const THREAD_TEXT: &str = "off.thread";
 
 /// Keeps the hold on a thread of its own, woken when the altars change.
 pub(crate) fn keep(load: &mut Load<'_>) -> Result<(), Off> {
@@ -35,7 +40,7 @@ pub(crate) fn keep(load: &mut Load<'_>) -> Result<(), Off> {
     let handle = std::thread::Builder::new()
         .name(THREAD.into())
         .spawn(move || run(&hold, &running))
-        .map_err(|e| Off::new(format!("hold thread: {e}")))?;
+        .map_err(|e| Off::text(THREAD_TEXT, &[("error", &e.to_string())]))?;
     let thread = handle.thread().clone();
     let opened = Arc::clone(&loaded);
     load.on::<WorldLoaded>(move |()| opened.store(true, Ordering::Release))?;
@@ -101,12 +106,29 @@ impl Watch {
     }
 }
 
-/// The hold's reason for a world of `grouping` past the game's own `limit`.
-fn past_reason(grouping: Grouping, limit: BaseLimit) -> String {
-    format!(
-        "the world has {} altar zones in {} bases, past the game's own {} zones in {} bases; \
-         without the raised limit the altars past them lose their base features",
-        grouping.zones, grouping.bases, limit.vanilla_zones, limit.vanilla_bases
+/// Sets the hold for a world of `grouping` past the game's own `limit`, with
+/// [`PAST_TEXT`] for the reader and one line for a log without the mod.
+fn set_past(hold: &Hold, grouping: Grouping, limit: BaseLimit) -> Result<(), StoreError> {
+    let [zones, bases, vanilla_zones, vanilla_bases] = [
+        grouping.zones,
+        grouping.bases,
+        limit.vanilla_zones,
+        limit.vanilla_bases,
+    ]
+    .map(|n| n.to_string());
+    hold.set_text(
+        &format!(
+            "the world has {zones} altar zones in {bases} bases, past the game's own \
+             {vanilla_zones} zones in {vanilla_bases} bases; without the raised limit the \
+             altars past them lose their base features"
+        ),
+        PAST_TEXT,
+        &[
+            ("zones", &zones),
+            ("bases", &bases),
+            ("vanilla_zones", &vanilla_zones),
+            ("vanilla_bases", &vanilla_bases),
+        ],
     )
 }
 
@@ -124,7 +146,7 @@ fn run(hold: &Hold, loaded: &AtomicBool) {
         let past = limit.past_vanilla(grouping);
         let done = match watch.step(past, loaded.load(Ordering::Acquire), Instant::now()) {
             Step::Wait => continue,
-            Step::Set => hold.set(&past_reason(grouping, limit)),
+            Step::Set => set_past(hold, grouping, limit),
             Step::Release => hold.clear(),
         };
         match done {
