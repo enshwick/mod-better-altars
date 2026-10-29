@@ -192,7 +192,10 @@ fn placed(input: &Input) -> String {
             input.len()
         )
     } else {
-        format!("{} altars placed, per Flame level {per_level:?}", input.len())
+        format!(
+            "{} altars placed, per Flame level {per_level:?}",
+            input.len()
+        )
     }
 }
 
