@@ -49,8 +49,9 @@ the nearest limit and writes a warning in the log. Where the mod keeps the
 game's limit of 16, it lowers larger values to 16. A change applies while the
 game runs. You change the number of levels in the list in the file only.
 
-`bases` is how many bases a world holds, from 16 to 179. Each game uses its own
-value for all its worlds. The value applies when the game starts again. A joined
+`bases` is how many bases a world holds, from 16 to 179. Each world keeps this
+value in its own settings file. The server does not send it to joined players.
+The value applies when the game starts again. A joined
 player groups the bases that the server holds. Where the game cannot hold more
 than 16 bases, the mod keeps 16 and says so in its log.
 
